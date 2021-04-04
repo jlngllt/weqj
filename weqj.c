@@ -10,21 +10,30 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_NB_SUBS 32
-#define MAX_NB_WORDS 64000
+#define WEQJ_VERSION 0.0.1
 
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define min(a, b) ((a) < (b) ? (a) : (b))
+#define WEQJ_MAX_NB_SUBS 32
+#define WEQJ_MAX_NB_WORDS 64000
 
-static int extract_subs(char *domain, char *subs[]) {
+#define XSTR(s) STR(s)
+#define STR(s) #s
+
+#define WEQJ_MAX_BYTES 1024 * 100
+static char io_buf[WEQJ_MAX_BYTES];
+
+static void print_version(void) {
+    puts("weqj " XSTR(WEQJ_VERSION));
+}
+
+static int extract_token(char *in, char *delim, char *out[], int count) {
   int ntokens = 0;
   char *save;
-  char *ptr = domain;
-  for (; ntokens < MAX_NB_SUBS; ++ntokens) {
-    char *tok = strtok_r(ptr, ".", &save);
+  char *ptr = in;
+  for (; ntokens < count; ++ntokens) {
+    char *tok = strtok_r(ptr, delim, &save);
     if (!tok)
       break;
-    subs[ntokens] = tok;
+    out[ntokens] = tok;
     ptr = save;
   }
   return ntokens;
@@ -43,7 +52,7 @@ static long extract_words(char *path, char *words[]) {
     line[strcspn(line, "\n")] = 0;
     words[lineno] = strdup(line);
     lineno++;
-    if (lineno >= MAX_NB_WORDS)
+    if (lineno >= WEQJ_MAX_NB_WORDS)
       break;
   }
   fclose(f);
@@ -57,18 +66,31 @@ static void free_words(int n, char *words[]) {
     }
 }
 
-static void usage(FILE *f) {
-  fprintf(f, "Usage: weqj [-vh] [-w WORDS] [-d DOMAINS]\n");
+static int read_stdin(char *domains[], int count) {
+    int tokenno, n, ii;
+    n = read(STDIN_FILENO, (char *)io_buf, sizeof(io_buf));
+    if (n <= 0) 
+        return n;
+    tokenno = extract_token(io_buf, "\n", domains, count);
+    for (ii = 0; ii < tokenno; ii++) {
+        printf("domains %d = %s\n", ii, domains[ii]);
+    }
+    return tokenno;
+}
+
+static void print_usage(FILE *f) {
+  fprintf(f, "Usage: weqj [-vh] [-w words file] [domains...]\n");
 }
 
 int main(int argc, char **argv) {
-  char *subs[MAX_NB_SUBS];
-  char *words[MAX_NB_SUBS];
-  int option;
-  int nwords = 0;
-  int nsubs = 0;
-  while ((option = getopt(argc, argv, "d:w:h")) != -1) {
+  char *subs[WEQJ_MAX_NB_SUBS];
+  char *words[WEQJ_MAX_NB_SUBS];
+  char *file;
+  int option, nwords, nsubs, ii;
+  nwords = 0;
+  while ((option = getopt(argc, argv, "d:w:hv")) != -1) {
     switch (option) {
+    #if 0
     case 'd': {
       int ii;
       nsubs = extract_subs(optarg, subs);
@@ -77,8 +99,8 @@ int main(int argc, char **argv) {
         printf("> %s\n", subs[ii]);
       }
     } break;
+    #endif
     case 'w': {
-      int ii;
       nwords = extract_words(optarg, words);
       printf("nwords = %d\n", nwords);
       for (ii = 0; ii < nwords; ++ii) {
@@ -86,10 +108,33 @@ int main(int argc, char **argv) {
       }
     } break;
     case 'h': {
-      usage(stdout);
+      print_usage(stdout);
       exit(EXIT_SUCCESS);
     } break;
+    case 'v': {
+      print_version();
+      exit(EXIT_SUCCESS);
+    } break;
+    default: {
+                 print_usage(stderr);
+                 exit(EXIT_FAILURE);
     }
+    }
+  }
+
+  {
+  char *domains[256];
+  int domainsno;
+  /* FIXME: max 256 */
+  /*
+  for (ii = optind; ii < argc; ii++) {
+      if (argv[ii] == '-') {
+        domainsno += read_stdin(domains);
+      } 
+      domains[domainsno] = strdup(argv[ii])
+  }
+  */
+  domainsno += read_stdin(domains, 256);
   }
   free_words(nwords, words);
   return 0;
