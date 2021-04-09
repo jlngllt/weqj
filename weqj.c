@@ -1,9 +1,11 @@
 #if defined(__OpenBSD__)
+
 #define _BSD_SOURCE
 #else
 #define _XOPEN_SOURCE 600
 #endif
 
+#include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -11,12 +13,18 @@
 #include <string.h>
 #include <unistd.h>
 
+struct list_str {
+  struct list *next;
+  char *str;
+};
+
 #define WEQJ_NUM_ELEM(x) (sizeof(x) / sizeof(*x))
 
 #define WEQJ_VERSION 0.0.1
 
 #define WEQJ_MAX_NB_SUBS 32
-#define WEQJ_MAX_NB_WORDS 64000
+#define WEQJ_MAX_NB_WORDS 2048
+#define WEQJ_MAX_NB_DOMAINS 1024
 
 #define XSTR(s) STR(s)
 #define STR(s) #s
@@ -58,6 +66,44 @@ static long extract_words(char *path, char *words[]) {
   }
   fclose(f);
   return lineno;
+}
+
+static void *xmalloc(size_t z)
+{
+    void *p = malloc(z);
+    if (!p) {
+      fprintf(stderr, "out of memory\n");
+      exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+static struct list_str *extract_words2(char *path)
+{
+  char l[256];
+  long n = 0;
+  FILE *f = fopen(path, "r");
+  struct list_str *head = xmalloc(sizeof(struct list_str));
+  struct list_str *tail = head;
+  if (!f)
+  {
+    fprintf(stderr, "failed to open file %s: error %d, %s\n", path, errno,
+            strerror(errno));
+    return 0;
+  }
+  while (fgets(l, sizeof(l), f)) {
+    l[strcspn(l, "\n")] = 0;
+    if (!tail) {
+      tail = xmalloc(sizeof(struct list_str));
+    }
+    tail->str = strdup(l);
+    printf("tail->str = %s\n", tail->str);
+    tail = tail->next;
+    n++;
+  }
+  tail->next = 0;
+  fclose(f);
+  return head;
 }
 
 static void free_words(int n, char *words[]) {
@@ -105,10 +151,11 @@ static int add_words_from_subdomains(char *domains[], int num_domains,
   return wordsno;
 }
 
+
 int main(int argc, char **argv) {
   char *subs[WEQJ_MAX_NB_SUBS];
   char *words[WEQJ_MAX_NB_SUBS];
-  char *domains[2048];
+  char *domains[WEQJ_MAX_NB_DOMAINS];
   char *file;
   int option, nwords, nsubs, ii, domainsno, n;
   const int max_domains = WEQJ_NUM_ELEM(domains);
@@ -118,10 +165,18 @@ int main(int argc, char **argv) {
     switch (option) {
     case 'w': {
       nwords = extract_words(optarg, words);
-      printf("nwords = %d\n", nwords);
+      struct list_str *head = extract_words2(optarg);
+      printf("prout\n");
+      struct list_str *p = head; 
+      while (p->next) {
+        printf("words = %s\n", p->str);
+        p = p->next;
+      }
+      #if 0
       for (ii = 0; ii < nwords; ++ii) {
         printf("> %s\n", words[ii]);
       }
+      #endif
     } break;
     case 'h': {
       print_usage(stdout);
@@ -137,18 +192,21 @@ int main(int argc, char **argv) {
     }
     }
   }
+  /* take domain parameter in stdin */
   if (optind < argc) {
     domainsno = 0;
-    for (ii = optind; domainsno < max_domains, ii < argc; ii++) {
+    for (ii = optind; ii < argc; ii++) {
       if (argv[ii][0] == '-' && argv[ii][1] == '\0') {
         if (!read_from_stdin) {
           n = read_line_from_stdin(domains, max_domains - domainsno);
           domainsno += n;
           read_from_stdin = true;
+        printf("num of domains = %d\n", domainsno);
         }
       } else {
         domains[domainsno] = strdup(argv[ii]);
         domainsno++;
+        assert(domainsno <= max_domains);
       }
     }
   } else if (!isatty(STDIN_FILENO)) {
@@ -158,11 +216,14 @@ int main(int argc, char **argv) {
     print_usage(stderr);
     exit(EXIT_FAILURE);
   }
+
   nwords += add_words_from_subdomains(domains, domainsno, &words[nwords],
                                       WEQJ_MAX_NB_SUBS - nwords);
+
   for (ii = 0; ii < nwords; ++ii) {
     printf("%d, %s\n", ii, words[ii]);
   }
+
   free_words(nwords, words);
   return 0;
 }
